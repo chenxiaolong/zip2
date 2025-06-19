@@ -893,7 +893,7 @@ impl<W: Write + Seek> ZipWriter<W> {
         name: S,
         options: FileOptions<T>,
         raw_values: Option<ZipRawValues>,
-    ) -> ZipResult<()> {
+    ) -> ZipResult<u64> {
         self.finish_file()?;
 
         let header_start = self.inner.get_plain().stream_position()?;
@@ -1031,10 +1031,10 @@ impl<W: Write + Seek> ZipWriter<W> {
         }
         let file = &mut self.files[index];
         debug_assert!(file.data_start.get().is_none());
-        file.data_start.get_or_init(|| self.stats.start);
+        let data_start = file.data_start.get_or_init(|| self.stats.start);
         self.stats.bytes_written = 0;
         self.stats.hasher = Hasher::new();
-        Ok(())
+        Ok(*data_start)
     }
 
     fn insert_file_data(&mut self, file: ZipFileData) -> ZipResult<usize> {
@@ -1164,7 +1164,7 @@ impl<W: Write + Seek> ZipWriter<W> {
         &mut self,
         name: S,
         mut options: FileOptions<T>,
-    ) -> ZipResult<()> {
+    ) -> ZipResult<u64> {
         options.normalize();
         let make_new_self = self.inner.prepare_next_writer(
             options.compression_method,
@@ -1172,11 +1172,11 @@ impl<W: Write + Seek> ZipWriter<W> {
             #[cfg(feature = "deflate-zopfli")]
             options.zopfli_buffer_size,
         )?;
-        self.start_entry(name, options, None)?;
+        let data_start = self.start_entry(name, options, None)?;
         let result = self.inner.switch_to(make_new_self);
         self.ok_or_abort_file(result)?;
         self.writing_raw = false;
-        Ok(())
+        Ok(data_start)
     }
 
     /* TODO: link to/use Self::finish_into_readable() from https://github.com/zip-rs/zip/pull/400 in
@@ -1254,7 +1254,7 @@ impl<W: Write + Seek> ZipWriter<W> {
         &mut self,
         path: P,
         options: FileOptions<E>,
-    ) -> ZipResult<()> {
+    ) -> ZipResult<u64> {
         self.start_file(path_to_string(path), options)
     }
 
@@ -2627,7 +2627,7 @@ mod test {
             .with_alignment(page_size);
         let mut zip = ZipWriter::new(Cursor::new(Vec::new()));
         let contents = b"sleeping";
-        let () = zip.start_file("sleep", options).unwrap();
+        let _data_start = zip.start_file("sleep", options).unwrap();
         let _count = zip.write(&contents[..]).unwrap();
         let mut zip = zip.finish_into_readable().unwrap();
         let file = zip.by_index(0).unwrap();
@@ -2645,7 +2645,7 @@ mod test {
                 .with_alignment(page_size);
             let mut zip = ZipWriter::new(Cursor::new(&mut data));
             let contents = b"sleeping";
-            let () = zip.start_file("sleep", options).unwrap();
+            let _data_start = zip.start_file("sleep", options).unwrap();
             let _count = zip.write(&contents[..]).unwrap();
         }
         assert_eq!(data[4096..4104], b"sleeping"[..]);
